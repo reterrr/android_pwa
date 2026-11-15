@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101828">
+  <meta name="description" content="Minimal accelerometer reader for Android">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/png" href="./icon-192.png">
+  <title>Accelerometer</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100dvh; padding: 24px; display: grid; place-items: center; background: #101828; color: #f8fafc; }
+    main { width: min(100%, 440px); }
+    h1 { margin: 0 0 8px; font-size: 30px; }
+    p { color: #aab5c6; line-height: 1.5; }
+    .readings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 28px 0; }
+    .tile { padding: 18px 8px; border-radius: 16px; background: #1d293b; text-align: center; }
+    .axis { color: #94a3b8; font-weight: 700; }
+    .value { font-variant-numeric: tabular-nums; font-size: clamp(19px, 6vw, 28px); margin-top: 12px; font-weight: 650; }
+    .unit { font-size: 12px; color: #94a3b8; margin-top: 5px; }
+    button { appearance: none; width: 100%; padding: 16px; border: 0; border-radius: 13px; background: #55d2ad; color: #09241c; font-size: 17px; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .secondary { background: #2b3d55; color: #f8fafc; margin-top: 10px; }
+    #status { font-size: 14px; min-height: 42px; margin-top: 18px; }
+    .hint { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Accelerometer</h1>
+    <p>Live motion measurements from your phone.</p>
+    <div class="readings" aria-live="off">
+      <div class="tile"><div class="axis">X</div><div id="x" class="value">—</div><div class="unit">m/s²</div></div>
+      <div class="tile"><div class="axis">Y</div><div id="y" class="value">—</div><div class="unit">m/s²</div></div>
+      <div class="tile"><div class="axis">Z</div><div id="z" class="value">—</div><div class="unit">m/s²</div></div>
+    </div>
+    <button id="start">Start reading</button>
+    <button id="stop" class="secondary" hidden>Stop</button>
+    <p id="status" role="status">Tap Start to read the accelerometer.</p>
+    <p class="hint">Includes gravity: when stationary, the acceleration magnitude is roughly 9.81 m/s². Values are processed locally on your phone.</p>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let running = false;
+    let firstMeasurement = false;
+    let lastUIUpdate = 0;
+
+    function onMotion(event) {
+      const a = event.accelerationIncludingGravity;
+      if (!a || [a.x, a.y, a.z].every(v => v == null)) {
+        $('status').textContent = 'No accelerometer data reported by this browser/device.';
+        return;
+      }
+      firstMeasurement = true;
+      const now = performance.now();
+      if (now - lastUIUpdate < 50) return;
+      lastUIUpdate = now;
+      for (const axis of ['x', 'y', 'z']) {
+        $(axis).textContent = typeof a[axis] === 'number' ? a[axis].toFixed(2) : '—';
+      }
+      $('status').textContent = 'Reading sensor…';
+    }
+
+    $('start').addEventListener('click', async () => {
+      if (!window.isSecureContext) {
+        $('status').textContent = 'Sensors require HTTPS. Open the app from its HTTPS URL.';
+        return;
+      }
+      if (!('DeviceMotionEvent' in window)) {
+        $('status').textContent = 'Motion sensors are not supported in this browser.';
+        return;
+      }
+      $('start').disabled = true;
+      try {
+        if (typeof DeviceMotionEvent.requestPermission === 'function') {
+          const permission = await DeviceMotionEvent.requestPermission();
+          if (permission !== 'granted') throw new Error('Motion sensor permission was denied.');
+        }
+        running = true;
+        firstMeasurement = false;
+        $('start').hidden = true;
+        $('stop').hidden = false;
+        $('status').textContent = 'Waiting for sensor measurements…';
+        window.addEventListener('devicemotion', onMotion);
+      } catch (error) {
+        $('status').textContent = error?.message || 'Unable to read accelerometer.';
+      } finally {
+        $('start').disabled = false;
+      }
+    });
+
+    function stop() {
+      if (!running) return;
+      running = false;
+      window.removeEventListener('devicemotion', onMotion);
+      $('start').hidden = false;
+      $('stop').hidden = true;
+      $('status').textContent = 'Stopped.';
+    }
+    $('stop').addEventListener('click', stop);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(console.warn);
+      });
+    }
+  </script>
+</body>
+</html>
